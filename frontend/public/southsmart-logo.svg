@@ -1,0 +1,45 @@
+<svg viewBox="14 12 348 524" fill="none" xmlns="http://www.w3.org/2000/svg">
+
+  <!-- LEFT finger: strong upper-left lean ~45° -->
+  <path d="M 145 278 C 134 232 114 170 68 44"
+        stroke="white" stroke-width="30" stroke-linecap="round" fill="none"/>
+
+  <!-- MIDDLE finger: slight lean, nearly straight up -->
+  <path d="M 186 260 C 182 214 178 158 174 34"
+        stroke="white" stroke-width="30" stroke-linecap="round" fill="none"/>
+
+  <!-- RIGHT finger: upper-right lean -->
+  <path d="M 238 268 C 250 222 268 168 295 86"
+        stroke="white" stroke-width="30" stroke-linecap="round" fill="none"/>
+
+  <!-- Palm bridge -->
+  <path d="M 118 292 C 146 276 168 262 186 258
+           C 206 254 224 262 248 276"
+        stroke="white" stroke-width="30" stroke-linecap="round" fill="none"/>
+
+  <!-- Outer loop: RIGHT side going down -->
+  <path d="M 248 276 C 282 282 316 304 326 346
+           C 336 390 322 440 298 462"
+        stroke="white" stroke-width="30" stroke-linecap="round" fill="none"/>
+
+  <!-- Outer loop: BOTTOM flat -->
+  <path d="M 298 462 C 272 494 238 508 184 508
+           C 130 508 96 494 70 462"
+        stroke="white" stroke-width="30" stroke-linecap="round" fill="none"/>
+
+  <!-- Outer loop: LEFT side (thumb) curving up and closing -->
+  <path d="M 70 462 C 44 438 34 396 38 350
+           C 42 306 64 282 92 276
+           C 108 270 116 276 118 292"
+        stroke="white" stroke-width="30" stroke-linecap="round" fill="none"/>
+
+  <!-- Inner teardrop: large, upper-left of loop, point toward upper-left -->
+  <path d="M 90 298
+           C 66 314 48 350 54 392
+           C 60 434 94 458 130 456
+           C 168 454 196 424 196 384
+           C 196 344 168 314 134 300
+           C 114 292 102 292 90 298 Z"
+        stroke="white" stroke-width="24" stroke-linejoin="round" fill="none"/>
+
+</svg>
