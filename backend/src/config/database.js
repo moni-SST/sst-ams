@@ -13,11 +13,6 @@ if (process.env.DATABASE_URL) {
     let i = 0;
     let sql = text.replace(/\?/g, () => `$${++i}`);
     sql = sql.replace(/datetime\('now'\)/gi, 'NOW()');
-    sql = sql.replace(/is_active\s*=\s*1/gi, 'is_active = true');
-    sql = sql.replace(/is_active\s*=\s*0/gi, 'is_active = false');
-    sql = sql.replace(/completed\s*=\s*1/gi, 'completed = true');
-    sql = sql.replace(/completed\s*=\s*0/gi, 'completed = false');
-    sql = sql.replace(/INTEGER PRIMARY KEY AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
     return sql;
   };
   const query = (text, params = []) => pool.query(convertQuery(text), params);
