@@ -3,7 +3,7 @@ services:
     name: sst-ams-backend
     runtime: node
     rootDir: backend
-    buildCommand: npm install
+    buildCommand: npm install && node src/db/init-pg.js
     startCommand: node server.js
     plan: free
     envVars:
