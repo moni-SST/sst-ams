@@ -12,20 +12,20 @@ services:
       - key: PORT
         value: 10000
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: sst-ams-db
+          property: connectionString
       - key: JWT_SECRET
-        sync: false
+        value: sst_ams_super_secret_key_change_in_production_2024
       - key: JWT_EXPIRES_IN
         value: 8h
       - key: MAX_FILE_SIZE
         value: 10485760
       - key: CLIENT_URL
         value: https://sst-application-system.web.app
-      - key: SMTP_HOST
-        value: smtp.gmail.com
-      - key: SMTP_PORT
-        value: 587
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASS
-        sync: false
+
+databases:
+  - name: sst-ams-db
+    plan: free
+    databaseName: ams_db
+    user: ams_user

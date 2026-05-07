@@ -109,9 +109,12 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { note_text, color, note_date, completed } = req.body;
+    const isAdmin = req.user.role === 'admin';
     const existing = await db.query(
-      'SELECT * FROM calendar_notes WHERE id = ? AND user_id = ?',
-      [req.params.id, req.user.id]
+      isAdmin
+        ? 'SELECT * FROM calendar_notes WHERE id = ?'
+        : 'SELECT * FROM calendar_notes WHERE id = ? AND user_id = ?',
+      isAdmin ? [req.params.id] : [req.params.id, req.user.id]
     );
     if (!existing.rows[0]) return res.status(404).json({ error: 'Note not found' });
     await db.query(
@@ -135,9 +138,12 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/notes/:id
 router.delete('/:id', async (req, res) => {
   try {
+    const isAdmin = req.user.role === 'admin';
     const existing = await db.query(
-      'SELECT id FROM calendar_notes WHERE id = ? AND user_id = ?',
-      [req.params.id, req.user.id]
+      isAdmin
+        ? 'SELECT id FROM calendar_notes WHERE id = ?'
+        : 'SELECT id FROM calendar_notes WHERE id = ? AND user_id = ?',
+      isAdmin ? [req.params.id] : [req.params.id, req.user.id]
     );
     if (!existing.rows[0]) return res.status(404).json({ error: 'Note not found' });
     await db.query('DELETE FROM calendar_notes WHERE id = ?', [req.params.id]);

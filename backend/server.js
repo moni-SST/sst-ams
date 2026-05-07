@@ -17,6 +17,8 @@ const allowedOrigins = [
   'http://localhost:5173',
   'https://southsmart-technologies-web.web.app',
   'https://southsmart-technologies-web.firebaseapp.com',
+  'https://sst-application-system.web.app',
+  'https://sst-application-system.firebaseapp.com',
   process.env.CLIENT_URL
 ].filter(Boolean);
 
@@ -24,7 +26,7 @@ app.use(cors({
   origin: (origin, cb) => cb(null, !origin || allowedOrigins.includes(origin) || origin.endsWith('.ngrok-free.app') || origin.endsWith('.ngrok.io')),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning']
 }));
 
 // Rate limiting
