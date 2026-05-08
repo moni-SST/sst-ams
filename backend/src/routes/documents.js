@@ -42,19 +42,6 @@ router.get('/convert/:id/:format', async (req, res) => {
       const { Document, Paragraph, TextRun, HeadingLevel, AlignmentType } = require('docx');
       let paragraphs = [];
 
-      // Try to extract text from PDF
-      if (ext === 'pdf') {
-        try {
-          const pdfParse = require('pdf-parse');
-          const pdfBuffer = fs.readFileSync(filePath);
-          const pdfData = await pdfParse(pdfBuffer);
-          const lines = pdfData.text.split('\n').filter(l => l.trim());
-          paragraphs = lines.map(line =>
-            new Paragraph({ children: [new TextRun({ text: line.trim(), size: 24 })] })
-          );
-        } catch { /* fall through to metadata-only */ }
-      }
-
       if (paragraphs.length === 0) {
         paragraphs = [
           new Paragraph({
@@ -116,19 +103,6 @@ router.get('/convert/:id/:format', async (req, res) => {
       ws.addRow({ field: 'Uploaded By', value: doc.uploaded_by_name || '' });
       ws.addRow({ field: 'Upload Date', value: doc.created_at ? new Date(doc.created_at).toLocaleDateString() : '' });
       ws.addRow({ field: 'File Type', value: ext.toUpperCase() });
-
-      // Extract text content if PDF
-      if (ext === 'pdf') {
-        try {
-          const pdfParse = require('pdf-parse');
-          const pdfBuffer = fs.readFileSync(filePath);
-          const pdfData = await pdfParse(pdfBuffer);
-          ws.addRow({});
-          ws.addRow({ field: 'Document Content', value: '' });
-          const lines = pdfData.text.split('\n').filter(l => l.trim());
-          lines.forEach(line => ws.addRow({ field: '', value: line.trim() }));
-        } catch { /* no text extraction */ }
-      }
 
       const buffer = await wb.xlsx.writeBuffer();
       res.setHeader('Content-Disposition', `attachment; filename="${baseName}.xlsx"`);
