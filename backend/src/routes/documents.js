@@ -29,87 +29,55 @@ router.get('/convert/:id/:format', async (req, res) => {
       : path.join(__dirname, '../../', doc.storage_path);
     const fileExists = fs.existsSync(filePath);
 
-    // ── Excel ────────────────────────────────────────────────────────────────
+    // ── Excel → CSV (Excel opens CSV natively, no packages needed) ───────────
     if (format === 'xlsx') {
-      // If already Excel and file exists, serve original
       if ((ext === 'xlsx' || ext === 'xls') && fileExists) {
         res.setHeader('Content-Disposition', `attachment; filename="${baseName}.${ext}"`);
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         return res.sendFile(filePath);
       }
 
-      // Build Excel from document metadata (no file access needed)
-      const ExcelJS = require('exceljs');
-      const wb = new ExcelJS.Workbook();
-      const ws = wb.addWorksheet('Document Info');
+      const escape = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
+      const csv = [
+        'Field,Value',
+        `${escape('Document Name')},${escape(doc.original_name)}`,
+        `${escape('Stage')},${escape(doc.stage_number ? 'Stage ' + doc.stage_number : 'General')}`,
+        `${escape('File Type')},${escape(ext.toUpperCase())}`,
+        `${escape('Upload Date')},${escape(doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : '')}`,
+      ].join('\r\n');
 
-      ws.columns = [
-        { header: 'Field', key: 'field', width: 30 },
-        { header: 'Value', key: 'value', width: 60 },
-      ];
-      ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
-
-      ws.addRow({ field: 'Document Name', value: doc.original_name });
-      ws.addRow({ field: 'Stage', value: doc.stage_number ? `Stage ${doc.stage_number}` : 'General' });
-      ws.addRow({ field: 'Uploaded By', value: doc.uploaded_by_name || '' });
-      ws.addRow({ field: 'Upload Date', value: doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : '' });
-      ws.addRow({ field: 'File Type', value: ext.toUpperCase() });
-
-      const xlsxBuffer = await wb.xlsx.writeBuffer();
-      res.setHeader('Content-Disposition', `attachment; filename="${baseName}.xlsx"`);
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      return res.send(Buffer.from(xlsxBuffer));
+      res.setHeader('Content-Disposition', `attachment; filename="${baseName}.csv"`);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      return res.send('﻿' + csv); // BOM so Excel shows Unicode correctly
     }
 
-    // ── Word ─────────────────────────────────────────────────────────────────
+    // ── Word → HTML-as-doc (Word opens HTML natively, no packages needed) ───
     if (format === 'docx') {
-      // If already Word and file exists, serve original
       if ((ext === 'docx' || ext === 'doc') && fileExists) {
         res.setHeader('Content-Disposition', `attachment; filename="${baseName}.${ext}"`);
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
         return res.sendFile(filePath);
       }
 
-      // Try docx npm package; fall back to HTML-as-doc if unavailable
-      try {
-        const { Document, Paragraph, TextRun, HeadingLevel } = require('docx');
-        const { Packer } = require('docx');
+      const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const html = `<html><head><meta charset="utf-8">
+        <style>body{font-family:Arial,sans-serif;font-size:12pt;margin:2cm;}
+        h1{color:#1e3a5f;}table{border-collapse:collapse;width:100%;}
+        td{padding:6px 10px;border:1px solid #ccc;}td:first-child{font-weight:bold;width:40%;background:#f0f4fa;}</style>
+      </head><body>
+        <h1>${esc(baseName)}</h1>
+        <table>
+          <tr><td>Document Name</td><td>${esc(doc.original_name)}</td></tr>
+          <tr><td>Stage</td><td>${esc(doc.stage_number ? 'Stage ' + doc.stage_number : 'General')}</td></tr>
+          <tr><td>File Type</td><td>${esc(ext.toUpperCase())}</td></tr>
+          <tr><td>Upload Date</td><td>${esc(doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : '')}</td></tr>
+        </table>
+        <p style="margin-top:20px;color:#888;font-style:italic;">Download the original file for full content.</p>
+      </body></html>`;
 
-        const wordDoc = new Document({
-          sections: [{
-            properties: {},
-            children: [
-              new Paragraph({ text: baseName, heading: HeadingLevel.HEADING_1 }),
-              new Paragraph({ children: [new TextRun('')] }),
-              new Paragraph({ children: [new TextRun({ text: `Document: ${doc.original_name}`, size: 24 })] }),
-              new Paragraph({ children: [new TextRun({ text: `Stage: ${doc.stage_number ? 'Stage ' + doc.stage_number : 'General'}`, size: 24 })] }),
-              new Paragraph({ children: [new TextRun({ text: `File Type: ${ext.toUpperCase()}`, size: 24 })] }),
-              new Paragraph({ children: [new TextRun({ text: `Upload Date: ${doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : ''}`, size: 24 })] }),
-              new Paragraph({ children: [new TextRun('')] }),
-              new Paragraph({ children: [new TextRun({ text: 'Note: Download the original file for full content.', size: 22, italics: true })] }),
-            ],
-          }],
-        });
-
-        const docxBuffer = await Packer.toBuffer(wordDoc);
-        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.docx"`);
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-        return res.send(docxBuffer);
-      } catch {
-        // docx package unavailable — return HTML that Word can open
-        const html = `<html><head><meta charset="utf-8"></head><body>
-          <h1>${baseName}</h1>
-          <p><b>Document:</b> ${doc.original_name}</p>
-          <p><b>Stage:</b> ${doc.stage_number ? 'Stage ' + doc.stage_number : 'General'}</p>
-          <p><b>File Type:</b> ${ext.toUpperCase()}</p>
-          <p><b>Upload Date:</b> ${doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : ''}</p>
-          <p><i>Note: Download the original file for full content.</i></p>
-        </body></html>`;
-        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.doc"`);
-        res.setHeader('Content-Type', 'application/msword');
-        return res.send(html);
-      }
+      res.setHeader('Content-Disposition', `attachment; filename="${baseName}.doc"`);
+      res.setHeader('Content-Type', 'application/msword');
+      return res.send(html);
     }
   } catch (err) {
     console.error('Convert error:', err);
