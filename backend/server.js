@@ -78,8 +78,8 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// Temporary migration endpoint - remove after use
-app.post('/api/migrate-data', async (req, res) => {
+// Migration endpoint removed after use
+app.post('/api/migrate-data-disabled', async (req, res) => {
   const secret = req.headers['x-migrate-secret'];
   if (secret !== 'sst-migrate-2026') return res.status(403).json({ error: 'Forbidden' });
   const db = require('./src/config/database');
