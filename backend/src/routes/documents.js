@@ -130,10 +130,10 @@ router.get('/convert/:id/:format', async (req, res) => {
         } catch { /* no text extraction */ }
       }
 
+      const buffer = await wb.xlsx.writeBuffer();
       res.setHeader('Content-Disposition', `attachment; filename="${baseName}.xlsx"`);
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      await wb.xlsx.write(res);
-      return res.end();
+      return res.send(Buffer.from(buffer));
     }
   } catch (err) {
     console.error('Convert error:', err);
