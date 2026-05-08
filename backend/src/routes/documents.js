@@ -29,7 +29,7 @@ router.get('/convert/:id/:format', async (req, res) => {
       : path.join(__dirname, '../../', doc.storage_path);
     const fileExists = fs.existsSync(filePath);
 
-    // ── Excel → CSV (Excel opens CSV natively, no packages needed) ───────────
+    // ── Excel → real .xlsx using exceljs ─────────────────────────────────────
     if (format === 'xlsx') {
       if ((ext === 'xlsx' || ext === 'xls') && fileExists) {
         res.setHeader('Content-Disposition', `attachment; filename="${baseName}.${ext}"`);
@@ -37,18 +37,27 @@ router.get('/convert/:id/:format', async (req, res) => {
         return res.sendFile(filePath);
       }
 
-      const escape = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
-      const csv = [
-        'Field,Value',
-        `${escape('Document Name')},${escape(doc.original_name)}`,
-        `${escape('Stage')},${escape(doc.stage_number ? 'Stage ' + doc.stage_number : 'General')}`,
-        `${escape('File Type')},${escape(ext.toUpperCase())}`,
-        `${escape('Upload Date')},${escape(doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : '')}`,
-      ].join('\r\n');
+      const ExcelJS = require('exceljs');
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Document Info');
 
-      res.setHeader('Content-Disposition', `attachment; filename="${baseName}.csv"`);
-      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      return res.send('﻿' + csv); // BOM so Excel shows Unicode correctly
+      ws.columns = [
+        { header: 'Field', key: 'field', width: 25 },
+        { header: 'Value', key: 'value', width: 60 },
+      ];
+      const headerRow = ws.getRow(1);
+      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
+
+      ws.addRow({ field: 'Document Name', value: doc.original_name });
+      ws.addRow({ field: 'Stage', value: doc.stage_number ? `Stage ${doc.stage_number}` : 'General' });
+      ws.addRow({ field: 'File Type', value: ext.toUpperCase() });
+      ws.addRow({ field: 'Upload Date', value: doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : '' });
+
+      const xlsxBuffer = await wb.xlsx.writeBuffer();
+      res.setHeader('Content-Disposition', `attachment; filename="${baseName}.xlsx"`);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      return res.send(Buffer.from(xlsxBuffer));
     }
 
     // ── Word → HTML-as-doc (Word opens HTML natively, no packages needed) ───
