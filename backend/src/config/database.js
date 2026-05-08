@@ -13,6 +13,19 @@ if (process.env.DATABASE_URL) {
     let i = 0;
     let sql = text.replace(/\?/g, () => `$${++i}`);
     sql = sql.replace(/datetime\('now'\)/gi, 'NOW()');
+    // strftime('%Y-%m', col) → TO_CHAR(col, 'YYYY-MM') etc.
+    sql = sql.replace(/strftime\(\s*'([^']+)'\s*,\s*([^)]+)\)/gi, (_, fmt, col) => {
+      const pgFmt = fmt
+        .replace(/%Y/g, 'YYYY').replace(/%m/g, 'MM').replace(/%d/g, 'DD')
+        .replace(/%H/g, 'HH24').replace(/%M/g, 'MI').replace(/%S/g, 'SS');
+      return `TO_CHAR(${col.trim()}::timestamp, '${pgFmt}')`;
+    });
+    // datetime('now', '-12 months') → NOW() - INTERVAL '12 months'
+    sql = sql.replace(/datetime\(\s*'now'\s*,\s*'([+-]?\d+)\s+(\w+)'\s*\)/gi,
+      (_, n, unit) => `(NOW() ${n.startsWith('-') ? '-' : '+'} INTERVAL '${n.replace(/[+-]/, '')} ${unit}')`);
+    // julianday(a) - julianday(b) → EXTRACT(EPOCH FROM (a::timestamp - b::timestamp))/86400
+    sql = sql.replace(/julianday\(([^)]+)\)\s*-\s*julianday\(([^)]+)\)/gi,
+      (_, a, b) => `EXTRACT(EPOCH FROM (${a.trim()}::timestamp - ${b.trim()}::timestamp))/86400`);
     return sql;
   };
   const query = (text, params = []) => pool.query(convertQuery(text), params);
