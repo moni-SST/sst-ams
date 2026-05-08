@@ -54,23 +54,35 @@ router.get('/convert/:id/:format', async (req, res) => {
       infoWs.addRow({ field: 'File Type', value: ext.toUpperCase() });
       infoWs.addRow({ field: 'Upload Date', value: doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : '' });
 
-      // Content sheet with PDF text extraction
+      // Content sheet with PDF text extraction (one row per line, grouped by page)
       if (ext === 'pdf' && fileExists) {
         try {
           const { PDFParse } = require('pdf-parse');
           const pdfBuffer = fs.readFileSync(filePath);
           const pdfData = await new PDFParse({ data: pdfBuffer }).getText();
-          const lines = pdfData.text.split('\n').map(l => l.trim()).filter(Boolean);
-          if (lines.length) {
+
+          const cleanLine = (s) => String(s || '')
+            .replace(/\.{3,}/g, ' ')
+            .replace(/[ \t]+/g, ' ')
+            .trim();
+
+          const pages = pdfData.pages?.length ? pdfData.pages : [{ num: 1, text: pdfData.text }];
+          const rows = [];
+          pages.forEach(p => {
+            const lines = p.text.split('\n').map(cleanLine).filter(Boolean);
+            lines.forEach(line => rows.push({ page: p.num, text: line }));
+          });
+
+          if (rows.length) {
             const contentWs = wb.addWorksheet('Content');
             contentWs.columns = [
-              { header: 'Line', key: 'line', width: 8 },
+              { header: 'Page', key: 'page', width: 8 },
               { header: 'Text', key: 'text', width: 120 },
             ];
             const ch = contentWs.getRow(1);
             ch.font = { bold: true, color: { argb: 'FFFFFFFF' } };
             ch.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
-            lines.forEach((line, i) => contentWs.addRow({ line: i + 1, text: line }));
+            rows.forEach(r => contentWs.addRow(r));
           }
         } catch (e) { console.error('PDF extract error:', e.message); }
       }
@@ -91,6 +103,14 @@ router.get('/convert/:id/:format', async (req, res) => {
 
       const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
+      // Clean PDF text: collapse leader dots, normalise whitespace
+      const cleanText = (s) => String(s || '')
+        .replace(/\.{3,}/g, ' ')           // dot leaders → space
+        .replace(/[ \t]+/g, ' ')           // collapse spaces
+        .replace(/ *\n */g, '\n')          // trim each line
+        .replace(/\n{3,}/g, '\n\n')        // collapse blank lines
+        .trim();
+
       // Extract PDF content if available
       let contentHtml = '<p style="margin-top:20px;color:#888;font-style:italic;">Download the original file for full content.</p>';
       if (ext === 'pdf' && fileExists) {
@@ -98,10 +118,23 @@ router.get('/convert/:id/:format', async (req, res) => {
           const { PDFParse } = require('pdf-parse');
           const pdfBuffer = fs.readFileSync(filePath);
           const pdfData = await new PDFParse({ data: pdfBuffer }).getText();
-          const text = pdfData.text.trim();
-          if (text) {
-            contentHtml = `<h2 style="color:#1e3a5f;margin-top:30px;">Document Content</h2>
-              <div style="white-space:pre-wrap;font-size:11pt;line-height:1.6;">${esc(text)}</div>`;
+
+          if (pdfData.pages?.length) {
+            const pageHtmls = pdfData.pages.map(p => {
+              const cleaned = cleanText(p.text);
+              if (!cleaned) return '';
+              return `<h3 style="color:#1e3a5f;margin-top:24px;border-bottom:1px solid #ccc;padding-bottom:4px;">Page ${p.num}</h3>
+                <div style="white-space:pre-wrap;font-size:11pt;line-height:1.6;">${esc(cleaned)}</div>`;
+            }).filter(Boolean).join('');
+            if (pageHtmls) {
+              contentHtml = `<h2 style="color:#1e3a5f;margin-top:30px;">Document Content</h2>${pageHtmls}`;
+            }
+          } else {
+            const text = cleanText(pdfData.text);
+            if (text) {
+              contentHtml = `<h2 style="color:#1e3a5f;margin-top:30px;">Document Content</h2>
+                <div style="white-space:pre-wrap;font-size:11pt;line-height:1.6;">${esc(text)}</div>`;
+            }
           }
         } catch (e) { console.error('PDF extract error:', e.message); }
       }
