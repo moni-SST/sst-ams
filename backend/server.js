@@ -78,8 +78,8 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// Migration endpoint removed after use
-app.post('/api/migrate-data-disabled', async (req, res) => {
+// Temporary migration endpoint v2
+app.post('/api/migrate-data', async (req, res) => {
   const secret = req.headers['x-migrate-secret'];
   if (secret !== 'sst-migrate-2026') return res.status(403).json({ error: 'Forbidden' });
   const db = require('./src/config/database');
@@ -96,11 +96,11 @@ app.post('/api/migrate-data-disabled', async (req, res) => {
     }
     results.users = users?.length;
 
-    // Projects
+    // Projects (only columns that exist in schema-pg.sql)
     for (const p of (projects || [])) {
       try {
-        await db.query(`INSERT INTO projects (id, project_number, customer_name, company_name, communication_type, customer_type, reference, description, priority, status, current_stage, progress_percentage, assigned_manager, total_value, po_reference, expected_end_date, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING`,
-          [p.id, p.project_number, p.customer_name, p.company_name, p.communication_type, p.customer_type, p.reference, p.description, p.priority, p.status, p.current_stage, p.progress_percentage, p.assigned_manager, p.total_value, p.po_reference, p.expected_end_date, p.created_by, p.created_at, p.updated_at]);
+        await db.query(`INSERT INTO projects (id, project_number, customer_name, company_name, communication_type, customer_type, reference, description, priority, status, current_stage, progress_percentage, assigned_manager, total_value, expected_end_date, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING`,
+          [p.id, p.project_number, p.customer_name, p.company_name, p.communication_type, p.customer_type, p.reference, p.description, p.priority, p.status, p.current_stage, p.progress_percentage, p.assigned_manager, p.total_value, p.expected_end_date, p.created_by, p.created_at, p.updated_at]);
       } catch(e) { console.log('project skip:', e.message); }
     }
     results.projects = projects?.length;
@@ -108,8 +108,9 @@ app.post('/api/migrate-data-disabled', async (req, res) => {
     // Stages
     for (const s of (project_stages || [])) {
       try {
-        await db.query(`INSERT INTO project_stages (id, project_id, stage_number, status, completed_at, completed_by, notes, updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING`,
-          [s.id, s.project_id, s.stage_number, s.status, s.completed_at, s.completed_by, s.notes, s.updated_at]);
+        const stageName = s.stage_name || ['Customer Requirement','Customer Name & Company','Communication','Customer Type','Company Details','NDA','Customer Design Requirement','SST Design + Quotation','Negotiation','Purchase Order','PO Acknowledgement','Terms & Advance','Payment Received','Project Execution','Delivery + Invoice','Installation & Commissioning','Project Sign Up','Balance Payment','Project Closed'][s.stage_number - 1] || 'Stage ' + s.stage_number;
+        await db.query(`INSERT INTO project_stages (id, project_id, stage_number, stage_name, status, updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING`,
+          [s.id, s.project_id, s.stage_number, stageName, s.status, s.updated_at]);
       } catch(e) { console.log('stage skip:', e.message); }
     }
     results.stages = project_stages?.length;
