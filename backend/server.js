@@ -78,6 +78,65 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+// Temporary migration endpoint - remove after use
+app.post('/api/migrate-data', async (req, res) => {
+  const secret = req.headers['x-migrate-secret'];
+  if (secret !== 'sst-migrate-2026') return res.status(403).json({ error: 'Forbidden' });
+  const db = require('./src/config/database');
+  const bcrypt = require('bcryptjs');
+  const { users, projects, project_stages, documents, payments, calendar_notes } = req.body;
+  const results = {};
+  try {
+    // Users
+    for (const u of (users || [])) {
+      try {
+        await db.query(`INSERT INTO users (id, username, email, password_hash, role, full_name, department, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
+          [u.id, u.username, u.email, u.password_hash, u.role, u.full_name, u.department, u.is_active ?? 1, u.created_at]);
+      } catch(e) { console.log('user skip:', e.message); }
+    }
+    results.users = users?.length;
+
+    // Projects
+    for (const p of (projects || [])) {
+      try {
+        await db.query(`INSERT INTO projects (id, project_number, customer_name, company_name, communication_type, customer_type, reference, description, priority, status, current_stage, progress_percentage, assigned_manager, total_value, po_reference, expected_end_date, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING`,
+          [p.id, p.project_number, p.customer_name, p.company_name, p.communication_type, p.customer_type, p.reference, p.description, p.priority, p.status, p.current_stage, p.progress_percentage, p.assigned_manager, p.total_value, p.po_reference, p.expected_end_date, p.created_by, p.created_at, p.updated_at]);
+      } catch(e) { console.log('project skip:', e.message); }
+    }
+    results.projects = projects?.length;
+
+    // Stages
+    for (const s of (project_stages || [])) {
+      try {
+        await db.query(`INSERT INTO project_stages (id, project_id, stage_number, status, completed_at, completed_by, notes, updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING`,
+          [s.id, s.project_id, s.stage_number, s.status, s.completed_at, s.completed_by, s.notes, s.updated_at]);
+      } catch(e) { console.log('stage skip:', e.message); }
+    }
+    results.stages = project_stages?.length;
+
+    // Calendar notes
+    for (const n of (calendar_notes || [])) {
+      try {
+        await db.query(`INSERT INTO calendar_notes (id, user_id, note_date, note_text, color, completed, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING`,
+          [n.id, n.user_id, n.note_date, n.note_text, n.color, n.completed ?? 0, n.created_at, n.updated_at]);
+      } catch(e) { console.log('note skip:', e.message); }
+    }
+    results.notes = calendar_notes?.length;
+
+    // Sequence reset for PostgreSQL
+    if (process.env.DATABASE_URL) {
+      const tables = ['users','projects','project_stages','documents','payments','calendar_notes'];
+      for (const t of tables) {
+        try { await db.query(`SELECT setval(pg_get_serial_sequence('${t}', 'id'), COALESCE((SELECT MAX(id) FROM ${t}), 1))`); } catch(e) {}
+      }
+    }
+
+    res.json({ success: true, migrated: results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Global error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
