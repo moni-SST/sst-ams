@@ -39,20 +39,41 @@ router.get('/convert/:id/:format', async (req, res) => {
 
       const ExcelJS = require('exceljs');
       const wb = new ExcelJS.Workbook();
-      const ws = wb.addWorksheet('Document Info');
 
-      ws.columns = [
+      // Info sheet with metadata
+      const infoWs = wb.addWorksheet('Info');
+      infoWs.columns = [
         { header: 'Field', key: 'field', width: 25 },
         { header: 'Value', key: 'value', width: 60 },
       ];
-      const headerRow = ws.getRow(1);
-      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
+      const infoHeader = infoWs.getRow(1);
+      infoHeader.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      infoHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
+      infoWs.addRow({ field: 'Document Name', value: doc.original_name });
+      infoWs.addRow({ field: 'Stage', value: doc.stage_number ? `Stage ${doc.stage_number}` : 'General' });
+      infoWs.addRow({ field: 'File Type', value: ext.toUpperCase() });
+      infoWs.addRow({ field: 'Upload Date', value: doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : '' });
 
-      ws.addRow({ field: 'Document Name', value: doc.original_name });
-      ws.addRow({ field: 'Stage', value: doc.stage_number ? `Stage ${doc.stage_number}` : 'General' });
-      ws.addRow({ field: 'File Type', value: ext.toUpperCase() });
-      ws.addRow({ field: 'Upload Date', value: doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : '' });
+      // Content sheet with PDF text extraction
+      if (ext === 'pdf' && fileExists) {
+        try {
+          const { PDFParse } = require('pdf-parse');
+          const pdfBuffer = fs.readFileSync(filePath);
+          const pdfData = await new PDFParse({ data: pdfBuffer }).getText();
+          const lines = pdfData.text.split('\n').map(l => l.trim()).filter(Boolean);
+          if (lines.length) {
+            const contentWs = wb.addWorksheet('Content');
+            contentWs.columns = [
+              { header: 'Line', key: 'line', width: 8 },
+              { header: 'Text', key: 'text', width: 120 },
+            ];
+            const ch = contentWs.getRow(1);
+            ch.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+            ch.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
+            lines.forEach((line, i) => contentWs.addRow({ line: i + 1, text: line }));
+          }
+        } catch (e) { console.error('PDF extract error:', e.message); }
+      }
 
       const xlsxBuffer = await wb.xlsx.writeBuffer();
       res.setHeader('Content-Disposition', `attachment; filename="${baseName}.xlsx"`);
@@ -69,6 +90,22 @@ router.get('/convert/:id/:format', async (req, res) => {
       }
 
       const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+      // Extract PDF content if available
+      let contentHtml = '<p style="margin-top:20px;color:#888;font-style:italic;">Download the original file for full content.</p>';
+      if (ext === 'pdf' && fileExists) {
+        try {
+          const { PDFParse } = require('pdf-parse');
+          const pdfBuffer = fs.readFileSync(filePath);
+          const pdfData = await new PDFParse({ data: pdfBuffer }).getText();
+          const text = pdfData.text.trim();
+          if (text) {
+            contentHtml = `<h2 style="color:#1e3a5f;margin-top:30px;">Document Content</h2>
+              <div style="white-space:pre-wrap;font-size:11pt;line-height:1.6;">${esc(text)}</div>`;
+          }
+        } catch (e) { console.error('PDF extract error:', e.message); }
+      }
+
       const html = `<html><head><meta charset="utf-8">
         <style>body{font-family:Arial,sans-serif;font-size:12pt;margin:2cm;}
         h1{color:#1e3a5f;}table{border-collapse:collapse;width:100%;}
@@ -81,7 +118,7 @@ router.get('/convert/:id/:format', async (req, res) => {
           <tr><td>File Type</td><td>${esc(ext.toUpperCase())}</td></tr>
           <tr><td>Upload Date</td><td>${esc(doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : '')}</td></tr>
         </table>
-        <p style="margin-top:20px;color:#888;font-style:italic;">Download the original file for full content.</p>
+        ${contentHtml}
       </body></html>`;
 
       res.setHeader('Content-Disposition', `attachment; filename="${baseName}.doc"`);
