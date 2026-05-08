@@ -358,7 +358,17 @@ export default function ProjectDetail() {
       a.click();
       window.URL.revokeObjectURL(url);
       toast.success(`Downloaded as ${label}`, { id: toastId });
-    } catch { toast.error(`${label} conversion failed`, { id: toastId }); }
+    } catch (err) {
+      let msg = `${label} conversion failed`;
+      if (err.response?.data) {
+        try {
+          const text = await err.response.data.text?.();
+          const parsed = JSON.parse(text || '{}');
+          if (parsed.error) msg += ': ' + parsed.error;
+        } catch { /* ignore */ }
+      }
+      toast.error(msg, { id: toastId });
+    }
   };
 
   const handleDeleteDoc = async (docId) => {
