@@ -21,93 +21,95 @@ router.get('/convert/:id/:format', async (req, res) => {
     if (!result.rows[0]) return res.status(404).json({ error: 'Document not found' });
 
     const doc = result.rows[0];
-    const filePath = path.isAbsolute(doc.storage_path)
-      ? doc.storage_path
-      : path.join(__dirname, '../../', doc.storage_path);
-
-    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
-
     const ext = doc.original_name.split('.').pop().toLowerCase();
     const baseName = doc.original_name.replace(/\.[^.]+$/, '');
 
-    if (format === 'docx') {
-      // If already a Word file, serve as-is
-      if (ext === 'docx' || ext === 'doc') {
-        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.${ext}"`);
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-        return res.sendFile(filePath);
-      }
+    const filePath = path.isAbsolute(doc.storage_path)
+      ? doc.storage_path
+      : path.join(__dirname, '../../', doc.storage_path);
+    const fileExists = fs.existsSync(filePath);
 
-      // Convert to Word using docx package
-      const { Document, Paragraph, TextRun, HeadingLevel, AlignmentType } = require('docx');
-      let paragraphs = [];
-
-      if (paragraphs.length === 0) {
-        paragraphs = [
-          new Paragraph({
-            children: [new TextRun({ text: 'This document was converted from: ' + doc.original_name, size: 24 })]
-          }),
-          new Paragraph({ children: [new TextRun({ text: '', size: 24 })] }),
-          new Paragraph({
-            children: [new TextRun({ text: 'Please download the original file for full content.', size: 24, italics: true })]
-          }),
-        ];
-      }
-
-      const wordDoc = new Document({
-        sections: [{
-          properties: {},
-          children: [
-            new Paragraph({
-              text: baseName,
-              heading: HeadingLevel.HEADING_1,
-            }),
-            new Paragraph({ children: [new TextRun({ text: '', size: 24 })] }),
-            ...paragraphs,
-          ],
-        }],
-      });
-
-      const { Packer } = require('docx');
-      const buffer = await Packer.toBuffer(wordDoc);
-      res.setHeader('Content-Disposition', `attachment; filename="${baseName}.docx"`);
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-      return res.send(buffer);
-    }
-
+    // ── Excel ────────────────────────────────────────────────────────────────
     if (format === 'xlsx') {
-      // If already an Excel file, serve as-is
-      if (ext === 'xlsx' || ext === 'xls') {
+      // If already Excel and file exists, serve original
+      if ((ext === 'xlsx' || ext === 'xls') && fileExists) {
         res.setHeader('Content-Disposition', `attachment; filename="${baseName}.${ext}"`);
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         return res.sendFile(filePath);
       }
 
-      // Create Excel with document metadata + extracted text
+      // Build Excel from document metadata (no file access needed)
       const ExcelJS = require('exceljs');
       const wb = new ExcelJS.Workbook();
-      const ws = wb.addWorksheet('Document');
+      const ws = wb.addWorksheet('Document Info');
 
       ws.columns = [
-        { header: 'Field', key: 'field', width: 25 },
+        { header: 'Field', key: 'field', width: 30 },
         { header: 'Value', key: 'value', width: 60 },
       ];
-
-      // Style header row
-      ws.getRow(1).font = { bold: true };
-      ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
       ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
 
       ws.addRow({ field: 'Document Name', value: doc.original_name });
       ws.addRow({ field: 'Stage', value: doc.stage_number ? `Stage ${doc.stage_number}` : 'General' });
       ws.addRow({ field: 'Uploaded By', value: doc.uploaded_by_name || '' });
-      ws.addRow({ field: 'Upload Date', value: doc.created_at ? new Date(doc.created_at).toLocaleDateString() : '' });
+      ws.addRow({ field: 'Upload Date', value: doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : '' });
       ws.addRow({ field: 'File Type', value: ext.toUpperCase() });
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const xlsxBuffer = await wb.xlsx.writeBuffer();
       res.setHeader('Content-Disposition', `attachment; filename="${baseName}.xlsx"`);
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      return res.send(Buffer.from(buffer));
+      return res.send(Buffer.from(xlsxBuffer));
+    }
+
+    // ── Word ─────────────────────────────────────────────────────────────────
+    if (format === 'docx') {
+      // If already Word and file exists, serve original
+      if ((ext === 'docx' || ext === 'doc') && fileExists) {
+        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.${ext}"`);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        return res.sendFile(filePath);
+      }
+
+      // Try docx npm package; fall back to HTML-as-doc if unavailable
+      try {
+        const { Document, Paragraph, TextRun, HeadingLevel } = require('docx');
+        const { Packer } = require('docx');
+
+        const wordDoc = new Document({
+          sections: [{
+            properties: {},
+            children: [
+              new Paragraph({ text: baseName, heading: HeadingLevel.HEADING_1 }),
+              new Paragraph({ children: [new TextRun('')] }),
+              new Paragraph({ children: [new TextRun({ text: `Document: ${doc.original_name}`, size: 24 })] }),
+              new Paragraph({ children: [new TextRun({ text: `Stage: ${doc.stage_number ? 'Stage ' + doc.stage_number : 'General'}`, size: 24 })] }),
+              new Paragraph({ children: [new TextRun({ text: `File Type: ${ext.toUpperCase()}`, size: 24 })] }),
+              new Paragraph({ children: [new TextRun({ text: `Upload Date: ${doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : ''}`, size: 24 })] }),
+              new Paragraph({ children: [new TextRun('')] }),
+              new Paragraph({ children: [new TextRun({ text: 'Note: Download the original file for full content.', size: 22, italics: true })] }),
+            ],
+          }],
+        });
+
+        const docxBuffer = await Packer.toBuffer(wordDoc);
+        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.docx"`);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        return res.send(docxBuffer);
+      } catch {
+        // docx package unavailable — return HTML that Word can open
+        const html = `<html><head><meta charset="utf-8"></head><body>
+          <h1>${baseName}</h1>
+          <p><b>Document:</b> ${doc.original_name}</p>
+          <p><b>Stage:</b> ${doc.stage_number ? 'Stage ' + doc.stage_number : 'General'}</p>
+          <p><b>File Type:</b> ${ext.toUpperCase()}</p>
+          <p><b>Upload Date:</b> ${doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : ''}</p>
+          <p><i>Note: Download the original file for full content.</i></p>
+        </body></html>`;
+        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.doc"`);
+        res.setHeader('Content-Type', 'application/msword');
+        return res.send(html);
+      }
     }
   } catch (err) {
     console.error('Convert error:', err);
