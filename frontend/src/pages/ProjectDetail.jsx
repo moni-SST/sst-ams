@@ -343,6 +343,24 @@ export default function ProjectDetail() {
     } catch { toast.error('Download failed'); }
   };
 
+  const handleConvert = async (doc, format) => {
+    const label = format === 'docx' ? 'Word' : 'Excel';
+    const toastId = toast.loading(`Converting to ${label}...`);
+    try {
+      const res = await documentsAPI.convert(doc.id, format);
+      const ext = doc.original_name.split('.').pop().toLowerCase();
+      const baseName = doc.original_name.replace(/\.[^.]+$/, '');
+      const outName = `${baseName}.${(['docx','doc'].includes(ext) && format === 'docx') || (['xlsx','xls'].includes(ext) && format === 'xlsx') ? ext : format}`;
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = outName;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success(`Downloaded as ${label}`, { id: toastId });
+    } catch { toast.error(`${label} conversion failed`, { id: toastId }); }
+  };
+
   const handleDeleteDoc = async (docId) => {
     if (!confirm('Delete this document?')) return;
     try {
@@ -636,8 +654,14 @@ export default function ProjectDetail() {
                     <button onClick={() => handlePreview(doc)} className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg" title="View">
                       <Eye size={16} />
                     </button>
-                    <button onClick={() => handleDownload(doc)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg" title="Download">
+                    <button onClick={() => handleDownload(doc)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg" title="Download original">
                       <Download size={16} />
+                    </button>
+                    <button onClick={() => handleConvert(doc, 'docx')} className="p-1.5 text-blue-700 hover:bg-blue-100 rounded-lg" title="Download as Word (.docx)">
+                      <FileText size={16} />
+                    </button>
+                    <button onClick={() => handleConvert(doc, 'xlsx')} className="p-1.5 text-green-700 hover:bg-green-100 rounded-lg" title="Download as Excel (.xlsx)">
+                      <Sheet size={16} />
                     </button>
                     <button onClick={() => handleDeleteDoc(doc.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg" title="Delete">
                       <Trash2 size={16} />
@@ -1170,9 +1194,15 @@ export default function ProjectDetail() {
                 <p className="font-semibold text-gray-800 truncate">{previewDoc.original_name}</p>
                 <p className="text-xs text-gray-400">Stage {previewDoc.stage_number || 'General'} · {previewDoc.uploaded_by_name}</p>
               </div>
-              <div className="flex items-center gap-2 ml-3 shrink-0">
+              <div className="flex items-center gap-2 ml-3 shrink-0 flex-wrap">
                 <button onClick={() => handleDownload(previewDoc)} className="btn-secondary flex items-center gap-1.5 text-sm py-1.5">
                   <Download size={15} /> Download
+                </button>
+                <button onClick={() => handleConvert(previewDoc, 'docx')} className="flex items-center gap-1.5 text-sm py-1.5 px-3 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors font-medium">
+                  <FileText size={15} /> Word
+                </button>
+                <button onClick={() => handleConvert(previewDoc, 'xlsx')} className="flex items-center gap-1.5 text-sm py-1.5 px-3 rounded-lg border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 transition-colors font-medium">
+                  <Sheet size={15} /> Excel
                 </button>
                 <button onClick={() => setPreviewDoc(null)} className="p-1.5 hover:bg-gray-100 rounded-lg">
                   <X size={20} className="text-gray-500" />

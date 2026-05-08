@@ -11,6 +11,136 @@ router.use(authenticate);
 // Specific routes first (before dynamic /:projectId)
 router.get('/download/:id', downloadDocument);
 
+// Convert document to Word or Excel
+router.get('/convert/:id/:format', async (req, res) => {
+  const { format } = req.params;
+  if (!['docx', 'xlsx'].includes(format)) return res.status(400).json({ error: 'Unsupported format' });
+
+  try {
+    const result = await db.query('SELECT * FROM documents WHERE id = ?', [req.params.id]);
+    if (!result.rows[0]) return res.status(404).json({ error: 'Document not found' });
+
+    const doc = result.rows[0];
+    const filePath = path.isAbsolute(doc.storage_path)
+      ? doc.storage_path
+      : path.join(__dirname, '../../', doc.storage_path);
+
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+
+    const ext = doc.original_name.split('.').pop().toLowerCase();
+    const baseName = doc.original_name.replace(/\.[^.]+$/, '');
+
+    if (format === 'docx') {
+      // If already a Word file, serve as-is
+      if (ext === 'docx' || ext === 'doc') {
+        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.${ext}"`);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        return res.sendFile(filePath);
+      }
+
+      // Convert to Word using docx package
+      const { Document, Paragraph, TextRun, HeadingLevel, AlignmentType } = require('docx');
+      let paragraphs = [];
+
+      // Try to extract text from PDF
+      if (ext === 'pdf') {
+        try {
+          const pdfParse = require('pdf-parse');
+          const pdfBuffer = fs.readFileSync(filePath);
+          const pdfData = await pdfParse(pdfBuffer);
+          const lines = pdfData.text.split('\n').filter(l => l.trim());
+          paragraphs = lines.map(line =>
+            new Paragraph({ children: [new TextRun({ text: line.trim(), size: 24 })] })
+          );
+        } catch { /* fall through to metadata-only */ }
+      }
+
+      if (paragraphs.length === 0) {
+        paragraphs = [
+          new Paragraph({
+            children: [new TextRun({ text: 'This document was converted from: ' + doc.original_name, size: 24 })]
+          }),
+          new Paragraph({ children: [new TextRun({ text: '', size: 24 })] }),
+          new Paragraph({
+            children: [new TextRun({ text: 'Please download the original file for full content.', size: 24, italics: true })]
+          }),
+        ];
+      }
+
+      const wordDoc = new Document({
+        sections: [{
+          properties: {},
+          children: [
+            new Paragraph({
+              text: baseName,
+              heading: HeadingLevel.HEADING_1,
+            }),
+            new Paragraph({ children: [new TextRun({ text: '', size: 24 })] }),
+            ...paragraphs,
+          ],
+        }],
+      });
+
+      const { Packer } = require('docx');
+      const buffer = await Packer.toBuffer(wordDoc);
+      res.setHeader('Content-Disposition', `attachment; filename="${baseName}.docx"`);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      return res.send(buffer);
+    }
+
+    if (format === 'xlsx') {
+      // If already an Excel file, serve as-is
+      if (ext === 'xlsx' || ext === 'xls') {
+        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.${ext}"`);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        return res.sendFile(filePath);
+      }
+
+      // Create Excel with document metadata + extracted text
+      const ExcelJS = require('exceljs');
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Document');
+
+      ws.columns = [
+        { header: 'Field', key: 'field', width: 25 },
+        { header: 'Value', key: 'value', width: 60 },
+      ];
+
+      // Style header row
+      ws.getRow(1).font = { bold: true };
+      ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
+      ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+
+      ws.addRow({ field: 'Document Name', value: doc.original_name });
+      ws.addRow({ field: 'Stage', value: doc.stage_number ? `Stage ${doc.stage_number}` : 'General' });
+      ws.addRow({ field: 'Uploaded By', value: doc.uploaded_by_name || '' });
+      ws.addRow({ field: 'Upload Date', value: doc.created_at ? new Date(doc.created_at).toLocaleDateString() : '' });
+      ws.addRow({ field: 'File Type', value: ext.toUpperCase() });
+
+      // Extract text content if PDF
+      if (ext === 'pdf') {
+        try {
+          const pdfParse = require('pdf-parse');
+          const pdfBuffer = fs.readFileSync(filePath);
+          const pdfData = await pdfParse(pdfBuffer);
+          ws.addRow({});
+          ws.addRow({ field: 'Document Content', value: '' });
+          const lines = pdfData.text.split('\n').filter(l => l.trim());
+          lines.forEach(line => ws.addRow({ field: '', value: line.trim() }));
+        } catch { /* no text extraction */ }
+      }
+
+      res.setHeader('Content-Disposition', `attachment; filename="${baseName}.xlsx"`);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      await wb.xlsx.write(res);
+      return res.end();
+    }
+  } catch (err) {
+    console.error('Convert error:', err);
+    res.status(500).json({ error: 'Conversion failed: ' + err.message });
+  }
+});
+
 // Preview endpoint — extracts text from .doc files
 router.get('/preview/:id', async (req, res) => {
   try {

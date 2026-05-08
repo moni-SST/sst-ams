@@ -9,6 +9,7 @@ const api = axios.create({
 api.interceptors.request.use(config => {
   const token = localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  config.headers['ngrok-skip-browser-warning'] = 'true';
   return config;
 });
 
@@ -58,6 +59,7 @@ export const documentsAPI = {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
   download: (id) => api.get(`/documents/download/${id}`, { responseType: 'blob' }),
+  convert: (id, format) => api.get(`/documents/convert/${id}/${format}`, { responseType: 'blob' }),
   delete: (id) => api.delete(`/documents/${id}`)
 };
 
