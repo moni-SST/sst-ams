@@ -20,9 +20,10 @@ if (process.env.DATABASE_URL) {
         .replace(/%H/g, 'HH24').replace(/%M/g, 'MI').replace(/%S/g, 'SS');
       return `TO_CHAR(${col.trim()}::timestamp, '${pgFmt}')`;
     });
-    // datetime('now', '-12 months') → NOW() - INTERVAL '12 months'
+    // datetime('now', '-12 months') → TO_CHAR(NOW() - INTERVAL '12 months', 'YYYY-MM-DD HH24:MI:SS')
+    // (text format so it can compare with TEXT-typed created_at columns)
     sql = sql.replace(/datetime\(\s*'now'\s*,\s*'([+-]?\d+)\s+(\w+)'\s*\)/gi,
-      (_, n, unit) => `(NOW() ${n.startsWith('-') ? '-' : '+'} INTERVAL '${n.replace(/[+-]/, '')} ${unit}')`);
+      (_, n, unit) => `TO_CHAR(NOW() ${n.startsWith('-') ? '-' : '+'} INTERVAL '${n.replace(/[+-]/, '')} ${unit}', 'YYYY-MM-DD HH24:MI:SS')`);
     // julianday(a) - julianday(b) → EXTRACT(EPOCH FROM (a::timestamp - b::timestamp))/86400
     sql = sql.replace(/julianday\(([^)]+)\)\s*-\s*julianday\(([^)]+)\)/gi,
       (_, a, b) => `EXTRACT(EPOCH FROM (${a.trim()}::timestamp - ${b.trim()}::timestamp))/86400`);
