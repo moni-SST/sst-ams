@@ -348,9 +348,11 @@ export default function ProjectDetail() {
     const toastId = toast.loading(`Converting to ${label}...`);
     try {
       const res = await documentsAPI.convert(doc.id, format);
-      const ext = doc.original_name.split('.').pop().toLowerCase();
       const baseName = doc.original_name.replace(/\.[^.]+$/, '');
-      const outName = `${baseName}.${(['docx','doc'].includes(ext) && format === 'docx') || (['xlsx','xls'].includes(ext) && format === 'xlsx') ? ext : format}`;
+      // Use filename from server's Content-Disposition header (it knows the real format)
+      const cd = res.headers?.['content-disposition'] || '';
+      const match = cd.match(/filename="?([^"]+)"?/i);
+      const outName = match ? match[1] : `${baseName}.${format}`;
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const a = document.createElement('a');
       a.href = url;
