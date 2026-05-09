@@ -49,6 +49,7 @@ const DocPreviewContent = ({ doc, projectId }) => {
       try {
         const token = localStorage.getItem('token');
         const apiBase = (import.meta.env.VITE_API_URL || '') + '/api';
+        const isCloudUrl = /^https?:\/\//i.test(doc.storage_path || '');
 
         if (ext === 'msg') {
           const res = await fetch(`${apiBase}/documents/preview/${doc.id}`, {
@@ -57,6 +58,14 @@ const DocPreviewContent = ({ doc, projectId }) => {
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || 'Preview failed');
           setMsgData(data);
+          setLoading(false);
+          return;
+        }
+
+        // Cloudinary-hosted: use direct URL for images/PDFs (no auth required, more reliable on mobile)
+        if (isCloudUrl && ['jpg','jpeg','png','gif','bmp','webp','svg','pdf'].includes(ext)) {
+          setBlobUrl(doc.storage_path);
+          setHtml(['pdf'].includes(ext) ? 'pdf' : 'image');
           setLoading(false);
           return;
         }
@@ -89,7 +98,7 @@ const DocPreviewContent = ({ doc, projectId }) => {
       }
     };
     load();
-    return () => { if (blobUrl) URL.revokeObjectURL(blobUrl); };
+    return () => { if (blobUrl && blobUrl.startsWith('blob:')) URL.revokeObjectURL(blobUrl); };
   }, [doc.id]);
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"/></div>;
@@ -129,7 +138,15 @@ const DocPreviewContent = ({ doc, projectId }) => {
   );
 
   if (html === 'image') return <img src={blobUrl} alt={doc.original_name} className="max-w-full max-h-[70vh] mx-auto rounded shadow object-contain" />;
-  if (html === 'pdf') return <iframe src={blobUrl} title={doc.original_name} className="w-full min-h-[70vh] rounded border-0" />;
+  if (html === 'pdf') {
+    // Cloudinary URL → use Google Docs viewer (renders reliably on mobile)
+    // Local blob URL → use direct iframe (works on desktop)
+    const isCloudUrl = blobUrl && /^https?:\/\//i.test(blobUrl);
+    const src = isCloudUrl
+      ? `https://docs.google.com/viewer?url=${encodeURIComponent(blobUrl)}&embedded=true`
+      : blobUrl;
+    return <iframe src={src} title={doc.original_name} className="w-full min-h-[70vh] rounded border-0" />;
+  }
   if (html === 'doc-nopreview' || html === 'unsupported') return (
     <div className="flex flex-col items-center justify-center h-64 gap-4">
       <FileText size={56} className="text-blue-200" />
