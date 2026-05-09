@@ -6,6 +6,20 @@ const db = require('../config/database');
 const path = require('path');
 const fs = require('fs');
 
+// Resolves a document's storage to a Buffer (handles both local files and Cloudinary URLs)
+const readDocumentBuffer = async (doc) => {
+  if (/^https?:\/\//i.test(doc.storage_path)) {
+    const remote = await fetch(doc.storage_path);
+    if (!remote.ok) throw new Error('Cloud file fetch failed (' + remote.status + ')');
+    return Buffer.from(await remote.arrayBuffer());
+  }
+  const filePath = path.isAbsolute(doc.storage_path)
+    ? doc.storage_path
+    : path.join(__dirname, '../../', doc.storage_path);
+  if (!fs.existsSync(filePath)) throw new Error('Local file not found');
+  return fs.readFileSync(filePath);
+};
+
 router.use(authenticate);
 
 // Specific routes first (before dynamic /:projectId)
@@ -24,14 +38,21 @@ router.get('/convert/:id/:format', async (req, res) => {
     const ext = doc.original_name.split('.').pop().toLowerCase();
     const baseName = doc.original_name.replace(/\.[^.]+$/, '');
 
-    const filePath = path.isAbsolute(doc.storage_path)
+    const isCloudUrl = /^https?:\/\//i.test(doc.storage_path);
+    const filePath = isCloudUrl ? null : (path.isAbsolute(doc.storage_path)
       ? doc.storage_path
-      : path.join(__dirname, '../../', doc.storage_path);
-    const fileExists = fs.existsSync(filePath);
+      : path.join(__dirname, '../../', doc.storage_path));
+    const fileExists = isCloudUrl || (filePath && fs.existsSync(filePath));
 
     // ── Excel → real .xlsx using exceljs ─────────────────────────────────────
     if (format === 'xlsx') {
       if ((ext === 'xlsx' || ext === 'xls') && fileExists) {
+        if (isCloudUrl) {
+          const buf = await readDocumentBuffer(doc);
+          res.setHeader('Content-Disposition', `attachment; filename="${baseName}.${ext}"`);
+          res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+          return res.send(buf);
+        }
         res.setHeader('Content-Disposition', `attachment; filename="${baseName}.${ext}"`);
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         return res.sendFile(filePath);
@@ -58,7 +79,7 @@ router.get('/convert/:id/:format', async (req, res) => {
       if (ext === 'pdf' && fileExists) {
         try {
           const { PDFParse } = require('pdf-parse');
-          const pdfBuffer = fs.readFileSync(filePath);
+          const pdfBuffer = await readDocumentBuffer(doc);
           const pdfData = await new PDFParse({ data: pdfBuffer }).getText();
 
           const cleanLine = (s) => String(s || '')
@@ -96,6 +117,12 @@ router.get('/convert/:id/:format', async (req, res) => {
     // ── Word → HTML-as-doc (Word opens HTML natively, no packages needed) ───
     if (format === 'docx') {
       if ((ext === 'docx' || ext === 'doc') && fileExists) {
+        if (isCloudUrl) {
+          const buf = await readDocumentBuffer(doc);
+          res.setHeader('Content-Disposition', `attachment; filename="${baseName}.${ext}"`);
+          res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+          return res.send(buf);
+        }
         res.setHeader('Content-Disposition', `attachment; filename="${baseName}.${ext}"`);
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
         return res.sendFile(filePath);
@@ -116,7 +143,7 @@ router.get('/convert/:id/:format', async (req, res) => {
       if (ext === 'pdf' && fileExists) {
         try {
           const { PDFParse } = require('pdf-parse');
-          const pdfBuffer = fs.readFileSync(filePath);
+          const pdfBuffer = await readDocumentBuffer(doc);
           const pdfData = await new PDFParse({ data: pdfBuffer }).getText();
 
           if (pdfData.pages?.length) {
@@ -171,18 +198,19 @@ router.get('/preview/:id', async (req, res) => {
     if (!result.rows[0]) return res.status(404).json({ error: 'Document not found' });
 
     const doc = result.rows[0];
-    const filePath = path.isAbsolute(doc.storage_path)
+    const isCloudUrl = /^https?:\/\//i.test(doc.storage_path);
+    const filePath = isCloudUrl ? null : (path.isAbsolute(doc.storage_path)
       ? doc.storage_path
-      : path.join(__dirname, '../../', doc.storage_path);
+      : path.join(__dirname, '../../', doc.storage_path));
 
-    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+    if (!isCloudUrl && !fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
 
     const ext = doc.original_name.split('.').pop().toLowerCase();
 
     if (ext === 'msg') {
       try {
         const MsgReader = require('@kenjiuno/msgreader').default || require('@kenjiuno/msgreader');
-        const buffer = fs.readFileSync(filePath);
+        const buffer = await readDocumentBuffer(doc);
         const reader = new MsgReader(buffer);
         const info = reader.getFileData();
         return res.json({
@@ -202,7 +230,7 @@ router.get('/preview/:id', async (req, res) => {
 
     if (ext === 'doc') {
       // Read file bytes to detect actual format
-      const rawBuf = fs.readFileSync(filePath);
+      const rawBuf = await readDocumentBuffer(doc);
       const hex8 = rawBuf.slice(0, 8).toString('hex');
 
       if (hex8.startsWith('d0cf11e0')) {
@@ -210,7 +238,15 @@ router.get('/preview/:id', async (req, res) => {
         try {
           const WordExtractor = require('word-extractor');
           const extractor = new WordExtractor();
-          const extracted = await extractor.extract(filePath);
+          // word-extractor needs a file path, so write buffer to temp file if from cloud
+          let tempPath = filePath;
+          if (isCloudUrl) {
+            const os = require('os');
+            tempPath = path.join(os.tmpdir(), `wordext-${Date.now()}.doc`);
+            fs.writeFileSync(tempPath, rawBuf);
+          }
+          const extracted = await extractor.extract(tempPath);
+          if (isCloudUrl && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
           const text = extracted.getBody();
           const html = `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.8;white-space:pre-wrap;padding:20px;">${text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`;
           return res.json({ html });

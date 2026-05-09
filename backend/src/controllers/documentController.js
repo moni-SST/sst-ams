@@ -2,6 +2,8 @@ const db = require('../config/database');
 const path = require('path');
 const fs = require('fs');
 const { sendDocumentUploadEmail } = require('../config/email');
+const { v4: uuidv4 } = require('uuid');
+const cloudinarySvc = require('../config/cloudinary');
 
 const uploadDocuments = async (req, res) => {
   try {
@@ -12,6 +14,7 @@ const uploadDocuments = async (req, res) => {
       return res.status(400).json({ error: 'No files uploaded' });
     }
 
+    const useCloudinary = cloudinarySvc.isEnabled();
     const uploaded = [];
     for (const file of req.files) {
       const stageResult = stage_number
@@ -19,12 +22,28 @@ const uploadDocuments = async (req, res) => {
         : null;
 
       const stageId = stageResult?.rows[0]?.id || null;
-      const storagePath = file.path.replace(/\\/g, '/');
+      let storagePath, fileName;
+
+      if (useCloudinary) {
+        const ext = path.extname(file.originalname).toLowerCase();
+        const publicId = `sst-ams/projects/${projectId}/${uuidv4()}`;
+        const result = await cloudinarySvc.uploadBuffer(file.buffer, {
+          public_id: publicId,
+          resource_type: 'auto',
+          // raw resource type for non-image/video files (PDF, doc, xlsx)
+          ...(['.pdf','.doc','.docx','.xls','.xlsx','.msg'].includes(ext) ? { resource_type: 'raw' } : {}),
+        });
+        storagePath = result.secure_url; // full https URL
+        fileName = result.public_id;     // store public_id for deletion later
+      } else {
+        storagePath = file.path.replace(/\\/g, '/');
+        fileName = file.filename;
+      }
 
       const result = await db.query(
         `INSERT INTO documents (project_id, stage_id, stage_number, file_name, original_name, file_type, file_size, storage_path, description, uploaded_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-        [projectId, stageId, stage_number || null, file.filename, file.originalname,
+        [projectId, stageId, stage_number || null, fileName, file.originalname,
          file.mimetype, file.size, storagePath, description || null, req.user.id]
       );
       uploaded.push(result.rows[0]);
@@ -95,6 +114,19 @@ const downloadDocument = async (req, res) => {
     }
 
     const doc = result.rows[0];
+
+    // Cloudinary URL → stream the remote file through, preserving original filename
+    if (/^https?:\/\//i.test(doc.storage_path)) {
+      const url = doc.storage_path + (doc.storage_path.includes('?') ? '&' : '?') + 'fl_attachment';
+      const remote = await fetch(url);
+      if (!remote.ok) return res.status(502).json({ error: 'Cloud file fetch failed' });
+      res.setHeader('Content-Type', doc.file_type || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${doc.original_name}"`);
+      const buffer = Buffer.from(await remote.arrayBuffer());
+      return res.send(buffer);
+    }
+
+    // Local file
     const filePath = path.isAbsolute(doc.storage_path)
       ? doc.storage_path
       : path.join(__dirname, '../../', doc.storage_path);
@@ -124,12 +156,21 @@ const deleteDocument = async (req, res) => {
       return res.status(403).json({ error: 'Not authorized to delete this document' });
     }
 
-    const filePath = path.isAbsolute(result.rows[0].storage_path)
-      ? result.rows[0].storage_path
-      : path.join(__dirname, '../../', result.rows[0].storage_path);
+    const doc = result.rows[0];
+    const isCloudUrl = /^https?:\/\//i.test(doc.storage_path);
 
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
+    if (isCloudUrl && cloudinarySvc.isEnabled() && doc.file_name) {
+      // file_name holds the Cloudinary public_id for cloud-hosted files
+      const ext = path.extname(doc.original_name).toLowerCase();
+      const resourceType = ['.pdf','.doc','.docx','.xls','.xlsx','.msg'].includes(ext) ? 'raw' : 'auto';
+      try {
+        await cloudinarySvc.destroy(doc.file_name, { resource_type: resourceType });
+      } catch (e) { console.error('Cloudinary destroy:', e.message); }
+    } else if (!isCloudUrl) {
+      const filePath = path.isAbsolute(doc.storage_path)
+        ? doc.storage_path
+        : path.join(__dirname, '../../', doc.storage_path);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
 
     await db.query('DELETE FROM documents WHERE id = $1', [id]);

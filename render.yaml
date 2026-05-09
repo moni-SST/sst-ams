@@ -23,6 +23,12 @@ services:
         value: 10485760
       - key: CLIENT_URL
         value: https://sst-application-system.web.app
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
 
 databases:
   - name: sst-ams-db
