@@ -12,7 +12,8 @@ if (process.env.DATABASE_URL) {
   const convertQuery = (text) => {
     let i = 0;
     let sql = text.replace(/\?/g, () => `$${++i}`);
-    sql = sql.replace(/datetime\('now'\)/gi, 'NOW()');
+    // datetime('now') → text format (since *_at columns are TEXT in schema-pg.sql)
+    sql = sql.replace(/datetime\('now'\)/gi, "TO_CHAR(NOW(), 'YYYY-MM-DD HH24:MI:SS')");
     // strftime('%Y-%m', col) → TO_CHAR(col, 'YYYY-MM') etc.
     sql = sql.replace(/strftime\(\s*'([^']+)'\s*,\s*([^)]+)\)/gi, (_, fmt, col) => {
       const pgFmt = fmt
