@@ -31,7 +31,15 @@ if (process.env.DATABASE_URL) {
     return sql;
   };
   const query = (text, params = []) => pool.query(convertQuery(text), params);
-  const getClient = () => pool.connect();
+  const getClient = async () => {
+    const client = await pool.connect();
+    const originalQuery = client.query.bind(client);
+    client.query = (text, params = []) => {
+      if (typeof text === 'string') return originalQuery(convertQuery(text), params);
+      return originalQuery(text, params);
+    };
+    return client;
+  };
 
   module.exports = { query, getClient, db: null };
 
