@@ -62,12 +62,20 @@ const DocPreviewContent = ({ doc, projectId }) => {
           return;
         }
 
-        // Cloudinary-hosted: use direct URL for images/PDFs (no auth required, more reliable on mobile)
-        if (isCloudUrl && ['jpg','jpeg','png','gif','bmp','webp','svg','pdf'].includes(ext)) {
-          setBlobUrl(doc.storage_path);
-          setHtml(['pdf'].includes(ext) ? 'pdf' : 'image');
-          setLoading(false);
-          return;
+        // Cloudinary-hosted: use direct URL — most reliable on mobile devices
+        if (isCloudUrl) {
+          if (['jpg','jpeg','png','gif','bmp','webp','svg'].includes(ext)) {
+            setBlobUrl(doc.storage_path);
+            setHtml('image');
+            setLoading(false);
+            return;
+          }
+          if (['pdf','doc','docx','xls','xlsx'].includes(ext)) {
+            setBlobUrl(doc.storage_path);
+            setHtml('pdf'); // 'pdf' branch uses Google Docs viewer, which handles all office formats
+            setLoading(false);
+            return;
+          }
         }
 
         const res = await fetch(`${apiBase}/documents/download/${doc.id}`, {
